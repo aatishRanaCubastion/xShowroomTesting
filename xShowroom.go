@@ -2,6 +2,11 @@ package main
 
 import fmt "fmt"
 
+type foo struct {
+	x, y int
+	u    float32
+}
+
 func add(a int, b int) int {
 	return a + b
 }

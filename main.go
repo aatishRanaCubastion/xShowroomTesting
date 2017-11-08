@@ -66,6 +66,11 @@ func main() {
 	//created file
 	f := NewFile("main")
 
+	f.Type().Id("foo").Struct(
+		List(Id("x"), Id("y")).Int(),
+		Id("u").Float32(),
+	)
+
 	//declaring method
 	f.Func().Id("add").Params(
 		Id("a").Int(),
@@ -84,8 +89,13 @@ func main() {
 	fmt.Fprintf(file, "%#v", f)
 
 	fmt.Println("Entities")
-	for _, value := range entities {
-		fmt.Println("\t", value)
+	for _, entity := range entities {
+		fmt.Print("\t", entity.Name, "(", entity.DisplayName, ")\n")
+
+		for _, column := range entity.Columns {
+			fmt.Print("\t\t", column.Name, " ", column.ColumnType.Type, "(", column.Size, ")\n")
+		}
+		fmt.Println()
 	}
 
 }
