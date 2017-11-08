@@ -14,19 +14,22 @@ type Entity struct {
 	ID          uint `sql:"AUTO_INCREMENT"`
 	Name        string `sql:"type:varchar(30)"`
 	DisplayName string `sql:"type:varchar(30)"`
+	Columns     []Column `gorm:"ForeignKey:entity_id;AssociationForeignKey:id"` // one to many, has many columns
 }
 
 type ColumnType struct {
-	ID   uint    `sql:"AUTO_INCREMENT"`
-	Type string `sql:"type:varchar(30)"`
+	ID      uint    `sql:"AUTO_INCREMENT"`
+	Type    string `sql:"type:varchar(30)"`
+	Columns []Column `gorm:"ForeignKey:type_id;AssociationForeignKey:id"` //one to many, has many columns
 }
 
 type Column struct {
-	ID       uint `sql:"AUTO_INCREMENT"`
-	Name     string `sql:"type:varchar(30)"`
-	Size     uint `sql:"type:int(30)"`
-	TypeID   uint `sql:"type:int(30)"`
-	EntityID uint `sql:"type:int(100)"`
+	ID         uint `sql:"AUTO_INCREMENT"`
+	Name       string `sql:"type:varchar(30)"`
+	Size       uint `sql:"type:int(30)"`
+	TypeID     uint `sql:"type:int(30)"`
+	EntityID   uint `sql:"type:int(100)"`
+	ColumnType ColumnType `gorm:"ForeignKey:TypeID"` //belong to (for reverse access)
 }
 
 func (Entity) TableName() string {
@@ -51,12 +54,9 @@ func main() {
 
 	db.AutoMigrate(&Entity{}, &Column{}, &ColumnType{})
 
-	//get all entities
 	entities := []Entity{}
-	db.Find(&entities)
 
-	allColumns := []Column{}
-	db.Find(&allColumns)
+	db.Debug().Preload("Columns.ColumnType").Find(&entities)
 
 	file, err := os.Create("xShowroom.go")
 	if err != nil {
@@ -85,11 +85,6 @@ func main() {
 
 	fmt.Println("Entities")
 	for _, value := range entities {
-		fmt.Println("\t", value)
-	}
-
-	fmt.Println("Columns")
-	for _, value := range allColumns {
 		fmt.Println("\t", value)
 	}
 
