@@ -31,7 +31,7 @@ func main() {
 	f.Func().Id("main").Params().Block(
 		Qual("fmt", "Println").Call(Lit("Hello, world")),
 		Qual("fmt", "Println").Call(Lit("Aatish Here")),
-		Qual("fmt","Println").Call(Id("add(2,3)")),
+		Qual("fmt","Println").Call(Qual("","add").Call(Id("2").Op(",").Id("3"))),
 	)
 
 
