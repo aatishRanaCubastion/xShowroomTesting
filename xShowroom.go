@@ -6,4 +6,6 @@ func main() {
 	fmt.Println("Hello, world")
 	fmt.Println("Aatish Here")
 }
-func add(a int) {}
+func add(a int, b int) int {
+	return a + b
+}
