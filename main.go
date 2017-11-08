@@ -8,6 +8,7 @@ import (
 	"log"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/jinzhu/gorm"
+	"strings"
 )
 
 type Entity struct {
@@ -66,10 +67,14 @@ func main() {
 	//created file
 	f := NewFile("main")
 
-	f.Type().Id("foo").Struct(
-		List(Id("x"), Id("y")).Int(),
-		Id("u").Float32(),
-	)
+	for _, entity := range entities {
+		f.Type().Id(snakeCaseToCamelCase(entity.Name)).StructFunc(func(g *Group) {
+			for _, column := range entity.Columns {
+				g.Id(snakeCaseToCamelCase(column.Name)).Int()
+				//colTypeMapper(column.ColumnType.Type)
+			}
+		})
+	}
 
 	//declaring method
 	f.Func().Id("add").Params(
@@ -87,15 +92,38 @@ func main() {
 	)
 
 	fmt.Fprintf(file, "%#v", f)
+}
 
-	fmt.Println("Entities")
-	for _, entity := range entities {
-		fmt.Print("\t", entity.Name, "(", entity.DisplayName, ")\n")
-
-		for _, column := range entity.Columns {
-			fmt.Print("\t\t", column.Name, " ", column.ColumnType.Type, "(", column.Size, ")\n")
-		}
-		fmt.Println()
+func colTypeMapper(colType string) *Statement {
+	if colType == "int" {
+		return Int()
+	} else if colType == "varchar" {
+		return String()
 	}
+	return String() //default
+}
+
+func snakeCaseToCamelCase(inputUnderScoreStr string) (camelCase string) {
+	//snake_case to camelCase
+
+	isToUpper := false
+
+	for k, v := range inputUnderScoreStr {
+		if k == 0 {
+			camelCase = strings.ToUpper(string(inputUnderScoreStr[0]))
+		} else {
+			if isToUpper {
+				camelCase += strings.ToUpper(string(v))
+				isToUpper = false
+			} else {
+				if v == '_' {
+					isToUpper = true
+				} else {
+					camelCase += string(v)
+				}
+			}
+		}
+	}
+	return
 
 }

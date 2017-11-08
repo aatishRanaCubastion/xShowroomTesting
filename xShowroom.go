@@ -2,9 +2,24 @@ package main
 
 import fmt "fmt"
 
-type foo struct {
-	x, y int
-	u    float32
+type XOrgExt struct {
+	Id           int
+	Name         int
+	AddressLine1 int
+	AddressLine2 int
+	City         int
+	State        int
+	Country      int
+}
+type XUser struct {
+	Id           int
+	FirstName    int
+	LastName     int
+	Email        int
+	PhoneNumber  int
+	AddressLine1 int
+	AddressLine2 int
+	UserType     int
 }
 
 func add(a int, b int) int {
