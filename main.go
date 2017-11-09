@@ -33,6 +33,27 @@ type Column struct {
 	ColumnType ColumnType `gorm:"ForeignKey:TypeID"` //belong to (for reverse access)
 }
 
+type RelationType struct {
+	ID   uint `sql:"AUTO_INCREMENT"`
+	Name string `sql:"type:varchar(30)"`
+}
+
+type Relation struct {
+	ParentEntityID    uint `sql:"type:int(100)"`
+	ParentEntityColID uint `sql:"type:int(100)"`
+	ChildEntityID     uint `sql:"type:int(100)"`
+	ChildEntityColID  uint `sql:"type:int(100)"`
+	InterEntityID     uint `sql:"type:int(100)"`
+	RelationTypeID    uint `sql:"type:int(10)"`
+
+	ParentEntity Entity `gorm:"ForeignKey:ParentEntityID"`       //belong to
+	ChildEntity  Entity `gorm:"ForeignKey:ChildEntityID"`        //belong to
+	InterEntity  Entity `gorm:"ForeignKey:InterEntityID"`        //belong to
+	ParentColumn Column `gorm:"ForeignKey:ParentEntityColID"`    //belong to
+	ChildColumn  Column `gorm:"ForeignKey:ChildEntityColID"`     //belong to
+	RelationType RelationType `gorm:"ForeignKey:RelationTypeID"` //belong to
+}
+
 func (Entity) TableName() string {
 	return "c_entity"
 }
@@ -45,6 +66,13 @@ func (Column) TableName() string {
 	return "c_column"
 }
 
+func (RelationType) TableName() string {
+	return "c_relation_type"
+}
+
+func (Relation) TableName() string {
+	return "c_relation"
+}
 
 func main() {
 
@@ -57,8 +85,16 @@ func main() {
 	db.AutoMigrate(&Entity{}, &Column{}, &ColumnType{})
 
 	entities := []Entity{}
+	db.Preload("Columns.ColumnType").
+		Find(&entities)
 
-	db.Debug().Preload("Columns.ColumnType").Find(&entities)
+	//print all tables
+	for _, entity := range entities {
+		fmt.Print(entity.Name + " (" + entity.DisplayName + ")\n")
+		for _, col := range entity.Columns {
+			fmt.Print("\t", col.Name, " ", col.ColumnType.Type, "(", col.Size, ")\n")
+		}
+	}
 
 	file, err := os.Create("xShowroom.go")
 	if err != nil {
@@ -68,27 +104,39 @@ func main() {
 	//created file
 	f := NewFile("main")
 
+	relations := []Relation{}
+	//creating structure
 	for _, entity := range entities {
+		db.Preload("ChildEntity").
+			Preload("ChildColumn").
+			Preload("ParentColumn").
+			Where("parent_entity_id=?", entity.ID).
+			Find(&relations)
 		f.Type().Id(snakeCaseToCamelCase(entity.Name)).StructFunc(func(g *Group) {
 			for _, column := range entity.Columns {
 				colTypeMapper(column, g)
 			}
+			for _, relation := range relations {
+				//todo get relation types from db
+				name := snakeCaseToCamelCase(relation.ChildEntity.Name)
+				childName := string(relation.ChildColumn.Name)
+				parentName := string(relation.ParentColumn.Name)
+				switch relation.RelationTypeID {
+				case 1: //one to one
+					g.Id(name + " " + name)
+				case 2: //one to many
+					finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
+					g.Id(finalId)
+				case 3: //many to many
+
+				}
+			}
 		})
 	}
-
-	//declaring method
-	f.Func().Id("add").Params(
-		Id("a").Int(),
-		Id("b").Int(),
-	).Int().Block(
-		Return(Id("a").Op("+").Id("b")),
-	)
 
 	//calling method
 	f.Func().Id("main").Params().Block(
 		Qual("fmt", "Println").Call(Lit("Hello, world")),
-		Qual("fmt", "Println").Call(Lit("Aatish Here")),
-		Qual("fmt", "Println").Call(Qual("", "add").Call(Id("2").Op(",").Id("3"))),
 	)
 
 	fmt.Fprintf(file, "%#v", f)

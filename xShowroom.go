@@ -10,6 +10,7 @@ type XOrgExt struct {
 	City         string
 	State        string
 	Country      string
+	XUsers       []XUser `gorm:"ForeignKey:org_id;AssociationForeignKey:id"`
 }
 type XUser struct {
 	Id           int
@@ -20,13 +21,9 @@ type XUser struct {
 	AddressLine1 string
 	AddressLine2 string
 	UserType     string
+	OrgId        int
 }
 
-func add(a int, b int) int {
-	return a + b
-}
 func main() {
 	fmt.Println("Hello, world")
-	fmt.Println("Aatish Here")
-	fmt.Println(add(2, 3))
 }
