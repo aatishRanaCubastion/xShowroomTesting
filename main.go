@@ -13,7 +13,7 @@ import (
 
 type Entity struct {
 	ID          uint `sql:"AUTO_INCREMENT"`
-	Name        string `sql:"type:varchar(30)"`
+	Name        string `sql:"type:varchar(30)"  gorm:"column:alias_name"`
 	DisplayName string `sql:"type:varchar(30)"`
 	Columns     []Column `gorm:"ForeignKey:entity_id;AssociationForeignKey:id"` // one to many, has many columns
 }
@@ -104,34 +104,9 @@ func main() {
 	//created file
 	f := NewFile("main")
 
-	relations := []Relation{}
 	//creating structure
 	for _, entity := range entities {
-		db.Preload("ChildEntity").
-			Preload("ChildColumn").
-			Preload("ParentColumn").
-			Where("parent_entity_id=?", entity.ID).
-			Find(&relations)
-		f.Type().Id(snakeCaseToCamelCase(entity.Name)).StructFunc(func(g *Group) {
-			for _, column := range entity.Columns {
-				colTypeMapper(column, g)
-			}
-			for _, relation := range relations {
-				//todo get relation types from db
-				name := snakeCaseToCamelCase(relation.ChildEntity.Name)
-				childName := string(relation.ChildColumn.Name)
-				parentName := string(relation.ParentColumn.Name)
-				switch relation.RelationTypeID {
-				case 1: //one to one
-					g.Id(name + " " + name)
-				case 2: //one to many
-					finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
-					g.Id(finalId)
-				case 3: //many to many
-
-				}
-			}
-		})
+		createModel(entity, db)
 	}
 
 	//calling method
@@ -142,11 +117,59 @@ func main() {
 	fmt.Fprintf(file, "%#v", f)
 }
 
+func createModel(entity Entity, db *gorm.DB) {
+	entityName := entity.DisplayName
+	file, err := os.Create("models/" + entityName + ".go")
+	if err != nil {
+		log.Fatal("Cannot create file", err)
+	}
+	defer file.Close()
+	//created file
+	f := NewFile("models")
+
+	relations := []Relation{}
+
+	db.Preload("ChildEntity").
+		Preload("ChildColumn").
+		Preload("ParentColumn").
+		Where("parent_entity_id=?", entity.ID).
+		Find(&relations)
+	f.Type().Id(snakeCaseToCamelCase(entity.DisplayName)).StructFunc(func(g *Group) {
+		for _, column := range entity.Columns {
+			colTypeMapper(column, g)
+		}
+		for _, relation := range relations {
+			//todo get relation types from db
+			name := snakeCaseToCamelCase(relation.ChildEntity.DisplayName)
+			childName := string(relation.ChildColumn.Name)
+			parentName := string(relation.ParentColumn.Name)
+			switch relation.RelationTypeID {
+			case 1: //one to one
+				g.Id(name + " " + name)
+			case 2: //one to many
+				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
+				g.Id(finalId)
+			case 3: //many to many
+
+			}
+		}
+	})
+
+	//add table name
+	f.Func().Params(Id(snakeCaseToCamelCase(entity.DisplayName))).Id("TableName").Params().String().Block(
+		Return(Lit(entity.Name)),
+	)
+
+	fmt.Fprintf(file, "%#v", f)
+}
+
 func colTypeMapper(col Column, g *Group) {
 	if col.ColumnType.Type == "int" {
-		g.Id(snakeCaseToCamelCase(col.Name)).Int()
+		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\"`"
+		g.Id(finalId)
 	} else if col.ColumnType.Type == "varchar" {
-		g.Id(snakeCaseToCamelCase(col.Name)).String()
+		finalId := snakeCaseToCamelCase(col.Name) + " string" + " `gorm:\"column:" + col.Name + "\"`"
+		g.Id(finalId)
 	} else {
 		g.Id(snakeCaseToCamelCase(col.Name)).String() //default string
 	}
