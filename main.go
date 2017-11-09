@@ -45,6 +45,12 @@ func (Column) TableName() string {
 	return "c_column"
 }
 
+type tokenType string
+type token struct {
+	typ     tokenType
+	content interface{}
+}
+
 func main() {
 
 	db, err := gorm.Open("mysql", "root:@tcp(127.0.0.1:3306)/xshowroomcustom?charset=utf8&parseTime=True&loc=Local")
@@ -70,8 +76,7 @@ func main() {
 	for _, entity := range entities {
 		f.Type().Id(snakeCaseToCamelCase(entity.Name)).StructFunc(func(g *Group) {
 			for _, column := range entity.Columns {
-				g.Id(snakeCaseToCamelCase(column.Name)).Int()
-				//colTypeMapper(column.ColumnType.Type)
+				colTypeMapper(column, g)
 			}
 		})
 	}
@@ -94,13 +99,14 @@ func main() {
 	fmt.Fprintf(file, "%#v", f)
 }
 
-func colTypeMapper(colType string) *Statement {
-	if colType == "int" {
-		return Int()
-	} else if colType == "varchar" {
-		return String()
+func colTypeMapper(col Column, g *Group) {
+	if col.ColumnType.Type == "int" {
+		g.Id(snakeCaseToCamelCase(col.Name)).Int()
+	} else if col.ColumnType.Type == "varchar" {
+		g.Id(snakeCaseToCamelCase(col.Name)).String()
+	} else {
+		g.Id(snakeCaseToCamelCase(col.Name)).String() //default string
 	}
-	return String() //default
 }
 
 func snakeCaseToCamelCase(inputUnderScoreStr string) (camelCase string) {

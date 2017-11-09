@@ -4,22 +4,22 @@ import fmt "fmt"
 
 type XOrgExt struct {
 	Id           int
-	Name         int
-	AddressLine1 int
-	AddressLine2 int
-	City         int
-	State        int
-	Country      int
+	Name         string
+	AddressLine1 string
+	AddressLine2 string
+	City         string
+	State        string
+	Country      string
 }
 type XUser struct {
 	Id           int
-	FirstName    int
-	LastName     int
-	Email        int
-	PhoneNumber  int
-	AddressLine1 int
-	AddressLine2 int
-	UserType     int
+	FirstName    string
+	LastName     string
+	Email        string
+	PhoneNumber  string
+	AddressLine1 string
+	AddressLine2 string
+	UserType     string
 }
 
 func add(a int, b int) int {
