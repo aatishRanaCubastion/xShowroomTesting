@@ -45,11 +45,6 @@ func (Column) TableName() string {
 	return "c_column"
 }
 
-type tokenType string
-type token struct {
-	typ     tokenType
-	content interface{}
-}
 
 func main() {
 
