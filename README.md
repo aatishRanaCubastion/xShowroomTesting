@@ -1,4 +1,4 @@
-#xShowroom code generation testing project
+# xShowroom code generation testing project
 
 #### Create new db
 #### Update credentials in config/config.json
