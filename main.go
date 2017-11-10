@@ -101,7 +101,7 @@ func main() {
 
 	//creating entity structures
 	for _, entity := range entities {
-		createModel(entity, db)
+		createEntities(entity, db)
 	}
 
 	//create xShowroom.go
@@ -112,6 +112,26 @@ func main() {
 	defer file.Close()
 	//created file
 	xShowroom := NewFile("main")
+
+	//write all code
+	createXShowRoom(xShowroom)
+
+	//flush xShowroom.go
+	fmt.Fprintf(file, "%#v", xShowroom)
+	fmt.Println("xShowroom generated!!")
+}
+
+//xShowroom generation methods
+func createXShowRoom(xShowroom *File) {
+
+	createXShowRoomConfigStruct(xShowroom)
+
+	createXShowRoomInitMethod(xShowroom)
+
+	createXShowRoomMainMethod(xShowroom)
+}
+
+func createXShowRoomConfigStruct(xShowroom *File) {
 
 	//add config struct
 	xShowroom.Comment("Configuration contains the application settings")
@@ -133,13 +153,17 @@ func main() {
 
 	//create an instance of configuration
 	xShowroom.Var().Id("config").Op("= &").Id("configuration{}")
+}
 
+func createXShowRoomInitMethod(xShowroom *File) {
 	//add init method in xShowroom.go
 	xShowroom.Func().Id("init").Params().Block(
 		Comment(" Use all cpu cores"),
 		Qual("runtime", "GOMAXPROCS").Call(Qual("runtime", "NumCPU").Call()),
 	)
+}
 
+func createXShowRoomMainMethod(xShowroom *File) {
 	//add main method in xShowroom.go
 	xShowroom.Func().Id("main").Params().Block(
 
@@ -147,7 +171,12 @@ func main() {
 		Qual("jsonconfig", "Load").Call(
 			Lit("config").
 				Op("+").
-				Id("string(os.PathSeparator)").
+				Id("string").
+				Op("(").
+				Id("os").
+				Op(".").
+				Id("PathSeparator").
+				Op(")").
 				Op("+").
 				Lit("config.json"),
 			Id("config")),
@@ -163,12 +192,10 @@ func main() {
 
 		Qual("fmt", "Println").Call(Lit("xShowroom is up and running!!")),
 	)
-
-	//flush xShowroom.go
-	fmt.Fprintf(file, "%#v", xShowroom)
 }
 
-func createModel(entity Entity, db *gorm.DB) {
+//models generation methods
+func createEntities(entity Entity, db *gorm.DB) {
 
 	// create entity name from table
 	entityName := snakeCaseToCamelCase(entity.DisplayName)
@@ -196,7 +223,7 @@ func createModel(entity Entity, db *gorm.DB) {
 
 		//write primitive fields
 		for _, column := range entity.Columns {
-			colTypeMapper(column, g)
+			mapColumnTypes(column, g)
 		}
 
 		//write composite fields
@@ -240,7 +267,7 @@ func createModel(entity Entity, db *gorm.DB) {
 	fmt.Fprintf(file, "%#v", modelFile)
 }
 
-func colTypeMapper(col Column, g *Group) {
+func mapColumnTypes(col Column, g *Group) {
 	if col.ColumnType.Type == "int" {
 		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\"`"
 		g.Id(finalId)
@@ -252,6 +279,7 @@ func colTypeMapper(col Column, g *Group) {
 	}
 }
 
+//helper methods
 func snakeCaseToCamelCase(inputUnderScoreStr string) (camelCase string) {
 	//snake_case to camelCase
 
