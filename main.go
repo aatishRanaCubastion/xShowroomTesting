@@ -76,76 +76,146 @@ func (Relation) TableName() string {
 
 func main() {
 
+	//open data base
 	db, err := gorm.Open("mysql", "root:@tcp(127.0.0.1:3306)/xshowroomcustom?charset=utf8&parseTime=True&loc=Local")
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer db.Close()
 
+	// migrate tables
 	db.AutoMigrate(&Entity{}, &Column{}, &ColumnType{})
 
+	//fetch all entities
 	entities := []Entity{}
 	db.Preload("Columns.ColumnType").
 		Find(&entities)
 
-	//print all tables
+	//print all entities
+	//for _, entity := range entities {
+	//	fmt.Print(entity.Name + " (" + entity.DisplayName + ")\n")
+	//	for _, col := range entity.Columns {
+	//		fmt.Print("\t", col.Name, " ", col.ColumnType.Type, "(", col.Size, ")\n")
+	//	}
+	//}
+
+	//creating entity structures
 	for _, entity := range entities {
-		fmt.Print(entity.Name + " (" + entity.DisplayName + ")\n")
-		for _, col := range entity.Columns {
-			fmt.Print("\t", col.Name, " ", col.ColumnType.Type, "(", col.Size, ")\n")
-		}
+		createModel(entity, db)
 	}
 
+	//create xShowroom.go
 	file, err := os.Create("xShowroom.go")
 	if err != nil {
 		log.Fatal("Cannot create file", err)
 	}
 	defer file.Close()
 	//created file
-	f := NewFile("main")
+	xShowroom := NewFile("main")
 
-	//creating structure
-	for _, entity := range entities {
-		createModel(entity, db)
-	}
-
-	//calling method
-	f.Func().Id("main").Params().Block(
-		Qual("fmt", "Println").Call(Lit("Hello, world")),
+	//add config struct
+	xShowroom.Comment("Configuration contains the application settings")
+	xShowroom.Type().Id("configuration").Struct(
+		Id("Database ").Qual("database", "Info"),
 	)
 
-	fmt.Fprintf(file, "%#v", f)
+	//add parse method to configuration
+	xShowroom.Comment("ParseJSON unmarshals bytes to structs")
+	xShowroom.Func().Params(
+		Id("c *").Id("configuration"), ).
+		Id("ParseJSON").
+		Params(Id("b []").Id("byte"), ).Error().Block(
+		Return(Qual("encoding/json", "Unmarshal").Call(
+			Id("b"),
+			Id("&c"),
+		)),
+	)
+
+	//create an instance of configuration
+	xShowroom.Var().Id("config").Op("= &").Id("configuration{}")
+
+	//add init method in xShowroom.go
+	xShowroom.Func().Id("init").Params().Block(
+		Comment(" Use all cpu cores"),
+		Qual("runtime", "GOMAXPROCS").Call(Qual("runtime", "NumCPU").Call()),
+	)
+
+	//add main method in xShowroom.go
+	xShowroom.Func().Id("main").Params().Block(
+
+		Comment("Load the configuration file"),
+		Qual("jsonconfig", "Load").Call(
+			Lit("config").
+				Op("+").
+				Id("string(os.PathSeparator)").
+				Op("+").
+				Lit("config.json"),
+			Id("config")),
+
+		Empty(),
+
+		Comment("Connect to database"),
+		Qual("database", "Connect").Call(
+			Id("config").Op(".").Id("Database"),
+		),
+
+		Empty(),
+
+		Qual("fmt", "Println").Call(Lit("xShowroom is up and running!!")),
+	)
+
+	//flush xShowroom.go
+	fmt.Fprintf(file, "%#v", xShowroom)
 }
 
 func createModel(entity Entity, db *gorm.DB) {
-	entityName := entity.DisplayName
+
+	// create entity name from table
+	entityName := snakeCaseToCamelCase(entity.DisplayName)
+
+	//create entity file in models sub directory
 	file, err := os.Create("models/" + entityName + ".go")
 	if err != nil {
 		log.Fatal("Cannot create file", err)
 	}
 	defer file.Close()
-	//created file
-	f := NewFile("models")
 
+	//set package as "models"
+	modelFile := NewFile("models")
+
+	//fetch relations of this entity
 	relations := []Relation{}
-
 	db.Preload("ChildEntity").
 		Preload("ChildColumn").
 		Preload("ParentColumn").
 		Where("parent_entity_id=?", entity.ID).
 		Find(&relations)
-	f.Type().Id(snakeCaseToCamelCase(entity.DisplayName)).StructFunc(func(g *Group) {
+
+	//write structure for entity
+	modelFile.Type().Id(entityName).StructFunc(func(g *Group) {
+
+		//write primitive fields
 		for _, column := range entity.Columns {
 			colTypeMapper(column, g)
 		}
+
+		//write composite fields
 		for _, relation := range relations {
+
 			//todo get relation types from db
 			name := snakeCaseToCamelCase(relation.ChildEntity.DisplayName)
 			childName := string(relation.ChildColumn.Name)
 			parentName := string(relation.ParentColumn.Name)
+
+			d := " "
+			if entityName == name {
+				d = " *" //if name and entityName are same, its a self join, so add *
+			}
+
 			switch relation.RelationTypeID {
 			case 1: //one to one
-				g.Id(name + " " + name)
+				finalId := name + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
+				g.Id(finalId)
 			case 2: //one to many
 				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
 				g.Id(finalId)
@@ -155,12 +225,19 @@ func createModel(entity Entity, db *gorm.DB) {
 		}
 	})
 
-	//add table name
-	f.Func().Params(Id(snakeCaseToCamelCase(entity.DisplayName))).Id("TableName").Params().String().Block(
+	//write table name method for our struct
+	modelFile.Func().Params(Id(snakeCaseToCamelCase(entity.DisplayName))).Id("TableName").Params().String().Block(
 		Return(Lit(entity.Name)),
 	)
 
-	fmt.Fprintf(file, "%#v", f)
+	//write getAll method
+	modelFile.Func().Id("Fetch" + entityName).Params(
+		Id("w").Qual("net/http", "ResponseWriter"),
+		Id("req").Op("*").Qual("net/http", "Request"),
+	).Block()
+
+	//flush file
+	fmt.Fprintf(file, "%#v", modelFile)
 }
 
 func colTypeMapper(col Column, g *Group) {
