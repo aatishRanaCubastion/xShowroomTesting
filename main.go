@@ -136,7 +136,8 @@ func createXShowRoomConfigStruct(xShowroom *File) {
 	//add config struct
 	xShowroom.Comment("Configuration contains the application settings")
 	xShowroom.Type().Id("configuration").Struct(
-		Id("Database ").Qual("database", "Info"),
+		Id("Database ").Qual("shared/database", "Info"),
+		Id("Server").Qual("shared/server", "Server"),
 	)
 
 	//add parse method to configuration
@@ -168,7 +169,7 @@ func createXShowRoomMainMethod(xShowroom *File) {
 	xShowroom.Func().Id("main").Params().Block(
 
 		Comment("Load the configuration file"),
-		Qual("jsonconfig", "Load").Call(
+		Qual("shared/jsonconfig", "Load").Call(
 			Lit("config").
 				Op("+").
 				Id("string").
@@ -184,13 +185,23 @@ func createXShowRoomMainMethod(xShowroom *File) {
 		Empty(),
 
 		Comment("Connect to database"),
-		Qual("database", "Connect").Call(
+		Qual("shared/database", "Connect").Call(
 			Id("config").Op(".").Id("Database"),
 		),
 
 		Empty(),
 
-		Qual("fmt", "Println").Call(Lit("xShowroom is up and running!!")),
+		Comment("Load the controller routes"),
+		Qual("models", "Load").Call(),
+
+		Empty(),
+
+		Comment("Start the listener"),
+		Qual("shared/server", "Run").Call(
+			Qual("shared/route", "LoadHTTP").Call(),
+			Qual("shared/route", "LoadHTTPS").Call(),
+			Id("config").Op(".").Id("Server"),
+		),
 	)
 }
 
@@ -201,7 +212,7 @@ func createEntities(entity Entity, db *gorm.DB) {
 	entityName := snakeCaseToCamelCase(entity.DisplayName)
 
 	//create entity file in models sub directory
-	file, err := os.Create("models/" + entityName + ".go")
+	file, err := os.Create("vendor/models/" + entityName + ".go")
 	if err != nil {
 		log.Fatal("Cannot create file", err)
 	}
@@ -257,11 +268,23 @@ func createEntities(entity Entity, db *gorm.DB) {
 		Return(Lit(entity.Name)),
 	)
 
+	fetchAllMethodName := "FetchAll" + entityName + "s"
+	//fetchByIdMethodName := "Fetch" + entityName
+
+	//write routes in init method
+	modelFile.Func().Id("init").Params().Block(
+		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(fetchAllMethodName)),
+	)
+
 	//write getAll method
-	modelFile.Func().Id("Fetch" + entityName).Params(
+	modelFile.Func().Id(fetchAllMethodName).Params(
 		Id("w").Qual("net/http", "ResponseWriter"),
 		Id("req").Op("*").Qual("net/http", "Request"),
-	).Block()
+	).Block(
+		Id("data").Op(":=").Op("[]").Id(entityName).Op("{}"),
+		Qual("shared/database", "SQL.Find").Call(Id("&").Id("data")),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("data")),
+	)
 
 	//flush file
 	fmt.Fprintf(file, "%#v", modelFile)

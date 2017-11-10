@@ -21,7 +21,7 @@
     "Hostname": "",
     "UseHTTP": true,
     "UseHTTPS": false,
-    "HTTPPort": 80,
+    "HTTPPort": 9000,
     "HTTPSPort": 443,
     "CertFile": "tls/server.crt",
     "KeyFile": "tls/server.key"

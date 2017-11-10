@@ -50,7 +50,8 @@ func Connect(d Info) {
 	switch d.Type {
 	case TypeMySQL:
 		// Connect to MySQL
-		if SQL, err = gorm.Open("mysql", DSN(d.MySQL)) err != nil {
+		SQL, err = gorm.Open("mysql", DSN(d.MySQL))
+		if err != nil {
 			log.Println("SQL Driver Error", err)
 		}
 
