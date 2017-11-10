@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
-
 	. "github.com/dave/jennifer/jen"
 	"os"
 	"log"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/jinzhu/gorm"
 	"strings"
+	"fmt"
 )
 
 type Entity struct {
@@ -99,9 +98,10 @@ func main() {
 	//	}
 	//}
 
+	allModels := make([]string, 0)
 	//creating entity structures
 	for _, entity := range entities {
-		createEntities(entity, db)
+		allModels = append(allModels, createEntities(entity, db))
 	}
 
 	//create xShowroom.go
@@ -114,7 +114,7 @@ func main() {
 	xShowroom := NewFile("main")
 
 	//write all code
-	createXShowRoom(xShowroom)
+	createXShowRoom(xShowroom, allModels)
 
 	//flush xShowroom.go
 	fmt.Fprintf(file, "%#v", xShowroom)
@@ -122,13 +122,13 @@ func main() {
 }
 
 //xShowroom generation methods
-func createXShowRoom(xShowroom *File) {
+func createXShowRoom(xShowroom *File, allModels []string) {
 
 	createXShowRoomConfigStruct(xShowroom)
 
 	createXShowRoomInitMethod(xShowroom)
 
-	createXShowRoomMainMethod(xShowroom)
+	createXShowRoomMainMethod(xShowroom, allModels)
 }
 
 func createXShowRoomConfigStruct(xShowroom *File) {
@@ -164,7 +164,8 @@ func createXShowRoomInitMethod(xShowroom *File) {
 	)
 }
 
-func createXShowRoomMainMethod(xShowroom *File) {
+func createXShowRoomMainMethod(xShowroom *File, allModels []string) {
+
 	//add main method in xShowroom.go
 	xShowroom.Func().Id("main").Params().Block(
 
@@ -196,6 +197,15 @@ func createXShowRoomMainMethod(xShowroom *File) {
 
 		Empty(),
 
+		Comment("Auto migrate all models"),
+		Qual("shared/database", "SQL.AutoMigrate").CallFunc(func(g *Group) {
+			for _, value := range allModels {
+				g.Id("&" + "models." + value + "{}")
+			}
+		}),
+
+		Empty(),
+
 		Comment("Start the listener"),
 		Qual("shared/server", "Run").Call(
 			Qual("shared/route", "LoadHTTP").Call(),
@@ -206,7 +216,7 @@ func createXShowRoomMainMethod(xShowroom *File) {
 }
 
 //models generation methods
-func createEntities(entity Entity, db *gorm.DB) {
+func createEntities(entity Entity, db *gorm.DB) string {
 
 	// create entity name from table
 	entityName := snakeCaseToCamelCase(entity.DisplayName)
@@ -288,6 +298,8 @@ func createEntities(entity Entity, db *gorm.DB) {
 
 	//flush file
 	fmt.Fprintf(file, "%#v", modelFile)
+
+	return entityName
 }
 
 func mapColumnTypes(col Column, g *Group) {
