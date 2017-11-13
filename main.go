@@ -293,7 +293,8 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	modelFile.Func().Id(getAllMethodName).Params(handlerRequestParams()).Block(
 		Id("data").Op(":=").Op("[]").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.Find").Call(Id("&").Id("data")),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("data")),
+		setJsonHeader(),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data fetched successfully", Id("data"))),
 	)
 
 	modelFile.Empty()
@@ -304,15 +305,10 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Id("ID").Op(":=").Qual("", "params.ByName").Call(Lit("id")),
 		Id("data").Op(":=").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.First").Call(Id("&").Id("data"), Id("ID")),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("data")),
+		setJsonHeader(),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data fetched successfully", Id("data"))),
 	)
 	//decoder := json.NewDecoder(req.Body)
-	//var t test_struct
-	//err := decoder.Decode(&t)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//defer req.Body.Close()
 
 	modelFile.Empty()
 	//write insert method
@@ -321,11 +317,13 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Var().Id("data").Id(entityName),
 		Id("err").Op(":=").Qual("", "decoder.Decode").Call(Id("&").Id("data")),
 		If(Id("err").Op("!=").Nil()).Block(
-			Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Lit("invalid data")),
+			Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(9999, "Data Not Saved", "invalid data")),
+			Return(),
 		),
 		Defer().Qual("", "req.Body.Close").Call(),
-		Qual("fmt", "Println").Call(Id("data")),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Lit("data saved")),
+		Qual("shared/database", "SQL.Create").Call(Id("&").Id("data")),
+		setJsonHeader(),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data Saved successfully", "data saved")),
 	)
 
 	//flush file
@@ -374,4 +372,17 @@ func snakeCaseToCamelCase(inputUnderScoreStr string) (camelCase string) {
 
 func handlerRequestParams() (Code, Code) {
 	return Id("w").Qual("net/http", "ResponseWriter"), Id("req").Op("*").Qual("net/http", "Request")
+}
+
+func setJsonHeader() Code {
+	return Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+}
+
+func setResponse(statusCode uint, statusMsg string, data interface{}) Code {
+	return Id("Response").
+		Op("{").
+		Lit(data).Op(",").
+		Lit(statusCode).Op(",").
+		Lit(statusMsg).
+		Op("}")
 }
