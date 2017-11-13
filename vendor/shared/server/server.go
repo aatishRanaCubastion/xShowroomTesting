@@ -37,6 +37,7 @@ func Run(httpHandlers http.Handler, httpsHandlers http.Handler, s Server) {
 
 // startHTTP starts the HTTP listener
 func startHTTP(handlers http.Handler, s Server) {
+	fmt.Println("xShowroom is up and running!!")
 	fmt.Println(time.Now().Format("2006-01-02 03:04:05 PM"), "Running HTTP "+httpAddress(s))
 
 	// Start the HTTP listener
@@ -45,6 +46,7 @@ func startHTTP(handlers http.Handler, s Server) {
 
 // startHTTPs starts the HTTPS listener
 func startHTTPS(handlers http.Handler, s Server) {
+	fmt.Println("xShowroom is up and running!!")
 	fmt.Println(time.Now().Format("2006-01-02 03:04:05 PM"), "Running HTTPS "+httpsAddress(s))
 
 	// Start the HTTPS listener

@@ -175,9 +175,7 @@ func createXShowRoomMainMethod(xShowroom *File, allModels []string) {
 				Op("+").
 				Id("string").
 				Op("(").
-				Id("os").
-				Op(".").
-				Id("PathSeparator").
+				Qual("os", "PathSeparator").
 				Op(")").
 				Op("+").
 				Lit("config.json"),
@@ -278,22 +276,56 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Return(Lit(entity.Name)),
 	)
 
-	fetchAllMethodName := "FetchAll" + entityName + "s"
-	//fetchByIdMethodName := "Fetch" + entityName
+	getAllMethodName := "GetAll" + entityName + "s"
+	getByIdMethodName := "Get" + entityName
+	postMethodName := "Post" + entityName
 
+	modelFile.Empty()
 	//write routes in init method
 	modelFile.Func().Id("init").Params().Block(
-		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(fetchAllMethodName)),
+		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(getAllMethodName)),
+		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(getByIdMethodName)),
+		Qual("shared/router", "Post").Call(Lit("/"+strings.ToLower(entityName)), Id(postMethodName)),
 	)
 
+	modelFile.Empty()
 	//write getAll method
-	modelFile.Func().Id(fetchAllMethodName).Params(
-		Id("w").Qual("net/http", "ResponseWriter"),
-		Id("req").Op("*").Qual("net/http", "Request"),
-	).Block(
+	modelFile.Func().Id(getAllMethodName).Params(handlerRequestParams()).Block(
 		Id("data").Op(":=").Op("[]").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.Find").Call(Id("&").Id("data")),
 		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("data")),
+	)
+
+	modelFile.Empty()
+	//write getOne method
+	modelFile.Func().Id(getByIdMethodName).Params(handlerRequestParams()).Block(
+		Comment("Get the parameter id"),
+		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
+		Id("ID").Op(":=").Qual("", "params.ByName").Call(Lit("id")),
+		Id("data").Op(":=").Id(entityName).Op("{}"),
+		Qual("shared/database", "SQL.First").Call(Id("&").Id("data"), Id("ID")),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("data")),
+	)
+	//decoder := json.NewDecoder(req.Body)
+	//var t test_struct
+	//err := decoder.Decode(&t)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//defer req.Body.Close()
+
+	modelFile.Empty()
+	//write insert method
+	modelFile.Func().Id(postMethodName).Params(handlerRequestParams()).Block(
+		Id("decoder").Op(":=").Qual("encoding/json", "NewDecoder").Call(Id("req").Op(".").Id("Body")),
+		Var().Id("data").Id(entityName),
+		Id("err").Op(":=").Qual("", "decoder.Decode").Call(Id("&").Id("data")),
+		If(Id("err").Op("!=").Nil()).Block(
+			Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Lit("invalid data")),
+		),
+		Defer().Qual("", "req.Body.Close").Call(),
+		Qual("fmt", "Println").Call(Id("data")),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Lit("data saved")),
 	)
 
 	//flush file
@@ -304,10 +336,10 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 func mapColumnTypes(col Column, g *Group) {
 	if col.ColumnType.Type == "int" {
-		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\"`"
+		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + "\"`"
 		g.Id(finalId)
 	} else if col.ColumnType.Type == "varchar" {
-		finalId := snakeCaseToCamelCase(col.Name) + " string" + " `gorm:\"column:" + col.Name + "\"`"
+		finalId := snakeCaseToCamelCase(col.Name) + " string" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + "\"`"
 		g.Id(finalId)
 	} else {
 		g.Id(snakeCaseToCamelCase(col.Name)).String() //default string
@@ -338,4 +370,8 @@ func snakeCaseToCamelCase(inputUnderScoreStr string) (camelCase string) {
 	}
 	return
 
+}
+
+func handlerRequestParams() (Code, Code) {
+	return Id("w").Qual("net/http", "ResponseWriter"), Id("req").Op("*").Qual("net/http", "Request")
 }
