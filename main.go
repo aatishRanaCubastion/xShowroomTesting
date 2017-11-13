@@ -260,10 +260,10 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 			switch relation.RelationTypeID {
 			case 1: //one to one
-				finalId := name + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
+				finalId := name + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + ",omitempty\"`"
 				g.Id(finalId)
 			case 2: //one to many
-				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\"`"
+				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + "s,omitempty\"`"
 				g.Id(finalId)
 			case 3: //many to many
 
@@ -279,6 +279,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	getAllMethodName := "GetAll" + entityName + "s"
 	getByIdMethodName := "Get" + entityName
 	postMethodName := "Post" + entityName
+	deleteMethodName := "Delete" + entityName
 
 	modelFile.Empty()
 	//write routes in init method
@@ -286,6 +287,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(getAllMethodName)),
 		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(getByIdMethodName)),
 		Qual("shared/router", "Post").Call(Lit("/"+strings.ToLower(entityName)), Id(postMethodName)),
+		Qual("shared/router", "Delete").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(deleteMethodName)),
 	)
 
 	modelFile.Empty()
@@ -326,6 +328,22 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data Saved successfully", "data saved")),
 	)
 
+	modelFile.Empty()
+	//write delete method
+	modelFile.Func().Id(deleteMethodName).Params(handlerRequestParams()).Block(
+		Comment("Get the parameter id"),
+		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
+		Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
+			Qual("", "params.ByName").Call(Lit("id")),
+			Id("10"),
+			Id("0"),
+		),
+		Id("data").Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(ID)").Op("}"),
+		Qual("shared/database", "SQL.Delete").Call(Id("&").Id("data")),
+		setJsonHeader(),
+		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data deleted successfully", Id("nil"))),
+	)
+
 	//flush file
 	fmt.Fprintf(file, "%#v", modelFile)
 
@@ -334,10 +352,10 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 func mapColumnTypes(col Column, g *Group) {
 	if col.ColumnType.Type == "int" {
-		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + "\"`"
+		finalId := snakeCaseToCamelCase(col.Name) + " uint" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + ",omitempty\"`"
 		g.Id(finalId)
 	} else if col.ColumnType.Type == "varchar" {
-		finalId := snakeCaseToCamelCase(col.Name) + " string" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + "\"`"
+		finalId := snakeCaseToCamelCase(col.Name) + " string" + " `gorm:\"column:" + col.Name + "\" json:\"" + col.Name + ",omitempty\"`"
 		g.Id(finalId)
 	} else {
 		g.Id(snakeCaseToCamelCase(col.Name)).String() //default string
@@ -381,8 +399,8 @@ func setJsonHeader() Code {
 func setResponse(statusCode uint, statusMsg string, data interface{}) Code {
 	return Id("Response").
 		Op("{").
-		Lit(data).Op(",").
 		Lit(statusCode).Op(",").
-		Lit(statusMsg).
+		Lit(statusMsg).Op(",").
+		Lit(data).
 		Op("}")
 }
