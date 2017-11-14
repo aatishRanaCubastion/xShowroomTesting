@@ -279,58 +279,122 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	getAllMethodName := "GetAll" + entityName + "s"
 	getByIdMethodName := "Get" + entityName
 	postMethodName := "Post" + entityName
+	putMethodName := "Put" + entityName
 	deleteMethodName := "Delete" + entityName
 
 	modelFile.Empty()
 	//write routes in init method
+	modelFile.Comment("Routes related to " + entityName)
 	modelFile.Func().Id("init").Params().Block(
 		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(getAllMethodName)),
 		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(getByIdMethodName)),
 		Qual("shared/router", "Post").Call(Lit("/"+strings.ToLower(entityName)), Id(postMethodName)),
+		Qual("shared/router", "Put").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(putMethodName)),
 		Qual("shared/router", "Delete").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(deleteMethodName)),
 	)
 
+	createEntitiesGetAllMethod(modelFile, entityName, getAllMethodName)
+
+	createEntitiesGetMethod(modelFile, entityName, getByIdMethodName)
+
+	createEntitiesPostMethod(modelFile, entityName, postMethodName)
+
+	createEntitiesPutMethod(modelFile, entityName, putMethodName)
+
+	createEntitiesDeleteMethod(modelFile, entityName, deleteMethodName)
+
+	fmt.Fprintf(file, "%#v", modelFile)
+
+	return entityName
+}
+
+func createEntitiesGetAllMethod(modelFile *File, entityName string, methodName string) {
 	modelFile.Empty()
 	//write getAll method
-	modelFile.Func().Id(getAllMethodName).Params(handlerRequestParams()).Block(
+	modelFile.Comment("This method will return a list of all " + entityName + "s")
+	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
 		Id("data").Op(":=").Op("[]").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.Find").Call(Id("&").Id("data")),
 		setJsonHeader(),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data fetched successfully", Id("data"))),
+		sendResponse(2000, "Data fetched successfully", Id("data")),
 	)
+}
 
+func createEntitiesGetMethod(modelFile *File, entityName string, methodName string) {
 	modelFile.Empty()
 	//write getOne method
-	modelFile.Func().Id(getByIdMethodName).Params(handlerRequestParams()).Block(
+	modelFile.Comment("This method will return one " + entityName + " based on id")
+	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
 		Comment("Get the parameter id"),
 		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
 		Id("ID").Op(":=").Qual("", "params.ByName").Call(Lit("id")),
 		Id("data").Op(":=").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.First").Call(Id("&").Id("data"), Id("ID")),
 		setJsonHeader(),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data fetched successfully", Id("data"))),
+		sendResponse(2000, "Data fetched successfully", Id("data")),
 	)
-	//decoder := json.NewDecoder(req.Body)
+}
 
+func createEntitiesPostMethod(modelFile *File, entityName string, methodName string) {
 	modelFile.Empty()
 	//write insert method
-	modelFile.Func().Id(postMethodName).Params(handlerRequestParams()).Block(
+	modelFile.Comment("This method will insert one " + entityName + " in db")
+	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
 		Id("decoder").Op(":=").Qual("encoding/json", "NewDecoder").Call(Id("req").Op(".").Id("Body")),
 		Var().Id("data").Id(entityName),
 		Id("err").Op(":=").Qual("", "decoder.Decode").Call(Id("&").Id("data")),
 		If(Id("err").Op("!=").Nil()).Block(
-			Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(9999, "Data Not Saved", "invalid data")),
+			setJsonHeader(),
+			sendResponse(9999, "Data not saved", "invalid data"),
 			Return(),
 		),
 		Defer().Qual("", "req.Body.Close").Call(),
 		Qual("shared/database", "SQL.Create").Call(Id("&").Id("data")),
 		setJsonHeader(),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data Saved successfully", "data saved")),
+		sendResponse(2000, "Data saved successfully", "data saved"),
 	)
+}
 
+func createEntitiesPutMethod(modelFile *File, entityName string, methodName string) {
+	modelFile.Empty()
+	//write update method
+	modelFile.Comment("This method will update " + entityName + " based on id")
+	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		Comment("Get the parameter id"),
+		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
+		Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
+			Qual("", "params.ByName").Call(Lit("id")),
+			Id("10"),
+			Id("0"),
+		),
+		Id("oldData").Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(ID)").Op("}"),
+		Empty(),
+
+		Comment("Get new data from request"),
+		Id("decoder").Op(":=").Qual("encoding/json", "NewDecoder").Call(Id("req").Op(".").Id("Body")),
+		Var().Id("newData").Id(entityName),
+		Id("err").Op(":=").Qual("", "decoder.Decode").Call(Id("&").Id("newData")),
+		If(Id("err").Op("!=").Nil()).Block(
+			setJsonHeader(),
+			sendResponse(9999, "Data not saved", "invalid data"),
+			Return(),
+		),
+		Defer().Qual("", "req.Body.Close").Call(),
+
+		Empty(),
+		Comment("Update record"),
+		Qual("shared/database", "SQL.Model").Call(Id("&oldData")).Op(".").Id("Updates").Call(Id("newData")),
+		setJsonHeader(),
+		sendResponse(2000, "Data updated successfully", Id("nil")),
+
+	)
+}
+
+func createEntitiesDeleteMethod(modelFile *File, entityName string, methodName string) {
 	modelFile.Empty()
 	//write delete method
-	modelFile.Func().Id(deleteMethodName).Params(handlerRequestParams()).Block(
+	modelFile.Comment("This method will delete " + entityName + " based on id")
+	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
 		Comment("Get the parameter id"),
 		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
 		Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
@@ -341,13 +405,8 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		Id("data").Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(ID)").Op("}"),
 		Qual("shared/database", "SQL.Delete").Call(Id("&").Id("data")),
 		setJsonHeader(),
-		Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(setResponse(2000, "Data deleted successfully", Id("nil"))),
+		sendResponse(2000, "Data deleted successfully", Id("nil")),
 	)
-
-	//flush file
-	fmt.Fprintf(file, "%#v", modelFile)
-
-	return entityName
 }
 
 func mapColumnTypes(col Column, g *Group) {
@@ -396,11 +455,11 @@ func setJsonHeader() Code {
 	return Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
 }
 
-func setResponse(statusCode uint, statusMsg string, data interface{}) Code {
-	return Id("Response").
+func sendResponse(statusCode uint, statusMsg string, data interface{}) Code {
+	return Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
 		Op("{").
 		Lit(statusCode).Op(",").
 		Lit(statusMsg).Op(",").
 		Lit(data).
-		Op("}")
+		Op("}"))
 }
