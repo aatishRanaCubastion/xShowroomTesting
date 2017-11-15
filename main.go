@@ -38,6 +38,7 @@ type RelationType struct {
 }
 
 type Relation struct {
+	ID                uint `sql:"AUTO_INCREMENT"`
 	ParentEntityID    uint `sql:"type:int(100)"`
 	ParentEntityColID uint `sql:"type:int(100)"`
 	ChildEntityID     uint `sql:"type:int(100)"`
@@ -73,6 +74,19 @@ func (Relation) TableName() string {
 	return "c_relation"
 }
 
+type EntityRelation struct {
+	Type             string
+	SubEntityName    string
+	SubEntityColName string
+}
+
+type EntityRelationMethod struct {
+	MethodName       string
+	Type             string
+	SubEntityName    string
+	SubEntityColName string
+}
+
 func main() {
 
 	//open data base
@@ -83,7 +97,7 @@ func main() {
 	defer db.Close()
 
 	// migrate tables
-	db.AutoMigrate(&Entity{}, &Column{}, &ColumnType{})
+	db.AutoMigrate(&Entity{}, &Column{}, &ColumnType{}, &Relation{}, &RelationType{})
 
 	//fetch all entities
 	entities := []Entity{}
@@ -118,7 +132,8 @@ func main() {
 
 	//flush xShowroom.go
 	fmt.Fprintf(file, "%#v", xShowroom)
-	fmt.Println("xShowroom generated!!")
+	fmt.Println("=========================")
+	fmt.Println("xShowroom generated!!!")
 }
 
 //xShowroom generation methods
@@ -218,6 +233,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 	// create entity name from table
 	entityName := snakeCaseToCamelCase(entity.DisplayName)
+	entityRelations := []EntityRelation{}
 
 	//create entity file in models sub directory
 	file, err := os.Create("vendor/models/" + entityName + ".go")
@@ -229,13 +245,21 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	//set package as "models"
 	modelFile := NewFile("models")
 
-	//fetch relations of this entity
-	relations := []Relation{}
+	//fetch relations of this entity matching parent
+	relationsParent := []Relation{}
 	db.Preload("ChildEntity").
 		Preload("ChildColumn").
 		Preload("ParentColumn").
 		Where("parent_entity_id=?", entity.ID).
-		Find(&relations)
+		Find(&relationsParent)
+
+	//fetch relations of this entity matching child
+	relationsChild := []Relation{}
+	db.Preload("ParentEntity").
+		Preload("ChildColumn").
+		Preload("ParentColumn").
+		Where("child_entity_id=?", entity.ID).
+		Find(&relationsChild)
 
 	//write structure for entity
 	modelFile.Type().Id(entityName).StructFunc(func(g *Group) {
@@ -245,25 +269,54 @@ func createEntities(entity Entity, db *gorm.DB) string {
 			mapColumnTypes(column, g)
 		}
 
-		//write composite fields
-		for _, relation := range relations {
-
-			//todo get relation types from db
+		//write composite fields while looking at parent
+		for _, relation := range relationsParent {
+			//fmt.Println("parent ", relation)
 			name := snakeCaseToCamelCase(relation.ChildEntity.DisplayName)
 			childName := string(relation.ChildColumn.Name)
 			parentName := string(relation.ParentColumn.Name)
 
 			d := " "
+			relType := "_normal"
 			if entityName == name {
-				d = " *" //if name and entityName are same, its a self join, so add *
+				d = "*" //if name and entityName are same, its a self join, so add *
+				relType = "_self"
 			}
 
 			switch relation.RelationTypeID {
 			case 1: //one to one
-				finalId := name + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + ",omitempty\"`"
+				finalId := name + " " + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + ",omitempty\"`"
+				entityRelations = append(entityRelations, EntityRelation{"OneToOne" + relType, name, childName})
 				g.Id(finalId)
 			case 2: //one to many
 				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + "s,omitempty\"`"
+				entityRelations = append(entityRelations, EntityRelation{"OneToMany", name, childName})
+				g.Id(finalId)
+			case 3: //many to many
+
+			}
+		}
+
+		//write composite fields while looking at child
+		for _, relation := range relationsChild {
+			//fmt.Println("child ", relation)
+			name := snakeCaseToCamelCase(relation.ParentEntity.DisplayName)
+			childName := string(relation.ChildColumn.Name)
+			//parentName := string(relation.ParentColumn.Name)
+
+			switch relation.RelationTypeID {
+			case 1: //ont to one
+				// means current entity's one item belongs to
+				if name != entityName { // if check to exclude self join
+					entityRelations = append(entityRelations, EntityRelation{"OneToOne_reverse", name, childName})
+					//todo no need, two way association not allowed
+					//finalId := name + " " + name + " `gorm:\"ForeignKey:" + snakeCaseToCamelCase(childName) + "\" json:\"" + name + ",omitempty\"`"
+					//g.Id(finalId)
+				}
+			case 2: //one to many
+				// means current entity's many items belongs to
+				finalId := name + " " + name + " `gorm:\"ForeignKey:" + snakeCaseToCamelCase(childName) + "\" json:\"" + name + ",omitempty\"`"
+				entityRelations = append(entityRelations, EntityRelation{"ManyToOne", name, childName})
 				g.Id(finalId)
 			case 3: //many to many
 
@@ -282,16 +335,49 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	putMethodName := "Put" + entityName
 	deleteMethodName := "Delete" + entityName
 
+	specialMethods := []EntityRelationMethod{}
+
 	modelFile.Empty()
 	//write routes in init method
 	modelFile.Comment("Routes related to " + entityName)
-	modelFile.Func().Id("init").Params().Block(
-		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(getAllMethodName)),
-		Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(getByIdMethodName)),
-		Qual("shared/router", "Post").Call(Lit("/"+strings.ToLower(entityName)), Id(postMethodName)),
-		Qual("shared/router", "Put").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(putMethodName)),
-		Qual("shared/router", "Delete").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(deleteMethodName)),
-	)
+	modelFile.Func().Id("init").Params().BlockFunc(func(g *Group) {
+
+		g.Empty()
+		g.Comment("Standard routes")
+		g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)), Id(getAllMethodName))
+		g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(getByIdMethodName))
+		g.Qual("shared/router", "Post").Call(Lit("/"+strings.ToLower(entityName)), Id(postMethodName))
+		g.Qual("shared/router", "Put").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(putMethodName))
+		g.Qual("shared/router", "Delete").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(deleteMethodName))
+
+		if len(entityRelations) > 0 {
+			g.Empty()
+			g.Comment("Special routes")
+			for _, entRel := range entityRelations {
+
+				if entRel.Type == "OneToMany" {
+					methodName := "Get" + entityName + entRel.SubEntityName + "s"
+					specialMethods = append(specialMethods, EntityRelationMethod{methodName, entRel.Type, entRel.SubEntityName, entRel.SubEntityColName})
+					g.Empty()
+					g.Comment("has many")
+					g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/"+strings.ToLower(entRel.SubEntityName+"s")), Id(methodName))
+				} else if entRel.Type == "OneToOne_normal" || entRel.Type == "OneToOne_self" || entRel.Type == "OneToOne_reverse" {
+					methodName := "Get" + entityName + entRel.SubEntityName
+					specialMethods = append(specialMethods, EntityRelationMethod{methodName, entRel.Type, entRel.SubEntityName, entRel.SubEntityColName})
+					g.Empty()
+					g.Comment("has one")
+					g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/"+strings.ToLower(entRel.SubEntityName)), Id(methodName))
+				} else if entRel.Type == "ManyToOne" {
+					methodName := "Get" + entityName + entRel.SubEntityName + ""
+					specialMethods = append(specialMethods, EntityRelationMethod{methodName, entRel.Type, entRel.SubEntityName, entRel.SubEntityColName})
+					g.Empty()
+					g.Comment("belongs to")
+					g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/"+strings.ToLower(entRel.SubEntityName)), Id(methodName))
+				}
+
+			}
+		}
+	})
 
 	createEntitiesGetAllMethod(modelFile, entityName, getAllMethodName)
 
@@ -303,8 +389,82 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 	createEntitiesDeleteMethod(modelFile, entityName, deleteMethodName)
 
+	if len(specialMethods) > 0 {
+		for _, method := range specialMethods {
+			modelFile.Empty()
+			modelFile.Func().Id(method.MethodName).Params(handlerRequestParams()).BlockFunc(func(g *Group) {
+				g.Empty()
+				g.Comment("Get the parameter id")
+				g.Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req"))
+				g.Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
+					Qual("", "params.ByName").Call(Lit("id")),
+					Id("10"),
+					Id("0"),
+				)
+
+				if method.Type == "OneToMany" {
+					g.Id("data").Op(":= []").Id(method.SubEntityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Lit(" "+method.SubEntityColName+" = ?"), Id("ID"))
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+
+				if method.Type == "OneToOne_self" || method.Type == "OneToOne_normal" {
+					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Lit(" "+method.SubEntityColName+" = ?"), Id("ID"))
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+
+				if method.Type == "OneToOne_reverse" {
+					g.Id(strings.ToLower(entityName)).Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(").Id("ID").Op(")}")
+					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(
+						Id("&").Id("data"), Lit(" id = (?)"),
+						Qual("shared/database", "SQL.Select").Call(Lit(method.SubEntityColName)).Op(".").Id("First").Call(Id("&").Id(strings.ToLower(entityName))).Op(".").Id("QueryExpr").Call(),
+					)
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+
+				if method.Type == "ManyToOne" {
+					g.Id(strings.ToLower(entityName)).Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(").Id("ID").Op(")}")
+
+					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(
+						Id("&").Id("data"), Lit(" id = (?)"),
+						Qual("shared/database", "SQL.Select").Call(Lit(method.SubEntityColName)).Op(".").Id("First").Call(Id("&").Id(strings.ToLower(entityName))).Op(".").Id("QueryExpr").Call(),
+					)
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+			})
+		}
+	}
+
 	fmt.Fprintf(file, "%#v", modelFile)
 
+	fmt.Println(entityName + " generated")
 	return entityName
 }
 
@@ -313,6 +473,7 @@ func createEntitiesGetAllMethod(modelFile *File, entityName string, methodName s
 	//write getAll method
 	modelFile.Comment("This method will return a list of all " + entityName + "s")
 	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		modelFile.Empty(),
 		Id("data").Op(":=").Op("[]").Id(entityName).Op("{}"),
 		Qual("shared/database", "SQL.Find").Call(Id("&").Id("data")),
 		setJsonHeader(),
@@ -325,6 +486,7 @@ func createEntitiesGetMethod(modelFile *File, entityName string, methodName stri
 	//write getOne method
 	modelFile.Comment("This method will return one " + entityName + " based on id")
 	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		modelFile.Empty(),
 		Comment("Get the parameter id"),
 		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
 		Id("ID").Op(":=").Qual("", "params.ByName").Call(Lit("id")),
@@ -340,6 +502,7 @@ func createEntitiesPostMethod(modelFile *File, entityName string, methodName str
 	//write insert method
 	modelFile.Comment("This method will insert one " + entityName + " in db")
 	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		modelFile.Empty(),
 		Id("decoder").Op(":=").Qual("encoding/json", "NewDecoder").Call(Id("req").Op(".").Id("Body")),
 		Var().Id("data").Id(entityName),
 		Id("err").Op(":=").Qual("", "decoder.Decode").Call(Id("&").Id("data")),
@@ -360,6 +523,7 @@ func createEntitiesPutMethod(modelFile *File, entityName string, methodName stri
 	//write update method
 	modelFile.Comment("This method will update " + entityName + " based on id")
 	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		modelFile.Empty(),
 		Comment("Get the parameter id"),
 		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
 		Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
@@ -395,6 +559,7 @@ func createEntitiesDeleteMethod(modelFile *File, entityName string, methodName s
 	//write delete method
 	modelFile.Comment("This method will delete " + entityName + " based on id")
 	modelFile.Func().Id(methodName).Params(handlerRequestParams()).Block(
+		modelFile.Empty(),
 		Comment("Get the parameter id"),
 		Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req")),
 		Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
