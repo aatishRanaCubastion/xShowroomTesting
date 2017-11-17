@@ -233,7 +233,12 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 	// create entity name from table
 	entityName := snakeCaseToCamelCase(entity.DisplayName)
-	entityRelations := []EntityRelation{}
+
+	//entity relations stored to generate routes and their methods for each sub entities ((parent to child) and (child to parent))
+	entityRelationsForEachEndpoint := []EntityRelation{}
+
+	//entity relations stored to generate one route to access all sub entities depending on query params(parent to child only)
+	entityRelationsForAllEndpoint := []EntityRelation{}
 
 	//create entity file in models sub directory
 	file, err := os.Create("vendor/models/" + entityName + ".go")
@@ -285,12 +290,16 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 			switch relation.RelationTypeID {
 			case 1: //one to one
-				finalId := name + " " + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + ",omitempty\"`"
-				entityRelations = append(entityRelations, EntityRelation{"OneToOne" + relType, name, childName})
+				relationName := name
+				finalId := relationName + " " + d + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + ",omitempty\"`"
+				entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"OneToOne" + relType, name, childName})
+				entityRelationsForAllEndpoint = append(entityRelationsForAllEndpoint, EntityRelation{"OneToOne" + relType, relationName, childName})
 				g.Id(finalId)
 			case 2: //one to many
-				finalId := name + "s []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + "s,omitempty\"`"
-				entityRelations = append(entityRelations, EntityRelation{"OneToMany", name, childName})
+				relationName := name + "s"
+				finalId := relationName + " []" + name + " `gorm:\"ForeignKey:" + childName + ";AssociationForeignKey:" + parentName + "\" json:\"" + relation.ChildEntity.DisplayName + "s,omitempty\"`"
+				entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"OneToMany", name, childName})
+				entityRelationsForAllEndpoint = append(entityRelationsForAllEndpoint, EntityRelation{"OneToMany", relationName, childName})
 				g.Id(finalId)
 			case 3: //many to many
 
@@ -308,7 +317,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 			case 1: //ont to one
 				// means current entity's one item belongs to
 				if name != entityName { // if check to exclude self join
-					entityRelations = append(entityRelations, EntityRelation{"OneToOne_reverse", name, childName})
+					entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"OneToOne_reverse", name, childName})
 					//todo no need, two way association not allowed
 					//finalId := name + " " + name + " `gorm:\"ForeignKey:" + snakeCaseToCamelCase(childName) + "\" json:\"" + name + ",omitempty\"`"
 					//g.Id(finalId)
@@ -316,7 +325,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 			case 2: //one to many
 				// means current entity's many items belongs to
 				finalId := name + " " + name + " `gorm:\"ForeignKey:" + snakeCaseToCamelCase(childName) + "\" json:\"" + name + ",omitempty\"`"
-				entityRelations = append(entityRelations, EntityRelation{"ManyToOne", name, childName})
+				entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"ManyToOne", name, childName})
 				g.Id(finalId)
 			case 3: //many to many
 
@@ -335,6 +344,9 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	putMethodName := "Put" + entityName
 	deleteMethodName := "Delete" + entityName
 
+	allMethodName := "GetAll" + entityName + "sSubEntities"
+	allMethodExist := false
+
 	specialMethods := []EntityRelationMethod{}
 
 	modelFile.Empty()
@@ -350,10 +362,10 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		g.Qual("shared/router", "Put").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(putMethodName))
 		g.Qual("shared/router", "Delete").Call(Lit("/"+strings.ToLower(entityName)+"/:id"), Id(deleteMethodName))
 
-		if len(entityRelations) > 0 {
+		if len(entityRelationsForEachEndpoint) > 0 {
 			g.Empty()
-			g.Comment("Special routes")
-			for _, entRel := range entityRelations {
+			g.Comment("Sub entities routes")
+			for _, entRel := range entityRelationsForEachEndpoint {
 
 				if entRel.Type == "OneToMany" {
 					methodName := "Get" + entityName + entRel.SubEntityName + "s"
@@ -377,7 +389,16 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 			}
 		}
+
+		if len(entityRelationsForAllEndpoint) > 0 {
+			allMethodExist = true
+			g.Empty()
+			g.Comment("Super sonic route")
+			g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/all"), Id(allMethodName))
+		}
 	})
+
+	createEntitiesChildSlice(modelFile, entityName, entityRelationsForAllEndpoint)
 
 	createEntitiesGetAllMethod(modelFile, entityName, getAllMethodName)
 
@@ -402,7 +423,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 					Id("0"),
 				)
 
-				if method.Type == "OneToMany" {
+				if method.Type == "OneToMany" || method.Type == "OneToOne_normal" {
 					g.Id("data").Op(":= []").Id(method.SubEntityName).Id("{}")
 					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Lit(" "+method.SubEntityColName+" = ?"), Id("ID"))
 					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
@@ -414,42 +435,26 @@ func createEntities(entity Entity, db *gorm.DB) string {
 						Op("}"))
 				}
 
-				if method.Type == "OneToOne_self" || method.Type == "OneToOne_normal" {
+				if method.Type == "ManyToOne" || method.Type == "OneToOne_reverse" {
+					g.Id(strings.ToLower(entityName)).Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(").Id("ID").Op(")}")
+
+					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(
+						Id("&").Id("data"), Lit(" id = (?)"),
+						Qual("shared/database", "SQL.Select").Call(Lit(method.SubEntityColName)).Op(".").Id("First").Call(Id("&").Id(strings.ToLower(entityName))).Op(".").Id("QueryExpr").Call(),
+					)
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+
+				if method.Type == "OneToOne_self" {
 					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
 					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Lit(" "+method.SubEntityColName+" = ?"), Id("ID"))
-					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
-					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
-						Op("{").
-						Id("2000").Op(",").
-						Lit("Data fetched successfully").Op(",").
-						Id("data").
-						Op("}"))
-				}
-
-				if method.Type == "OneToOne_reverse" {
-					g.Id(strings.ToLower(entityName)).Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(").Id("ID").Op(")}")
-					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
-					g.Qual("shared/database", "SQL.Find").Call(
-						Id("&").Id("data"), Lit(" id = (?)"),
-						Qual("shared/database", "SQL.Select").Call(Lit(method.SubEntityColName)).Op(".").Id("First").Call(Id("&").Id(strings.ToLower(entityName))).Op(".").Id("QueryExpr").Call(),
-					)
-					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
-					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
-						Op("{").
-						Id("2000").Op(",").
-						Lit("Data fetched successfully").Op(",").
-						Id("data").
-						Op("}"))
-				}
-
-				if method.Type == "ManyToOne" {
-					g.Id(strings.ToLower(entityName)).Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(").Id("ID").Op(")}")
-
-					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
-					g.Qual("shared/database", "SQL.Find").Call(
-						Id("&").Id("data"), Lit(" id = (?)"),
-						Qual("shared/database", "SQL.Select").Call(Lit(method.SubEntityColName)).Op(".").Id("First").Call(Id("&").Id(strings.ToLower(entityName))).Op(".").Id("QueryExpr").Call(),
-					)
 					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
 					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
 						Op("{").
@@ -462,10 +467,59 @@ func createEntities(entity Entity, db *gorm.DB) string {
 		}
 	}
 
+	if allMethodExist {
+		modelFile.Empty()
+		modelFile.Func().Id(allMethodName).Params(handlerRequestParams()).Block()
+
+		////Sample code
+		//// Get the parameter id
+		//params := router.Params(req)
+		//ID, _ := strconv.ParseUint(params.ByName("id"), 10, 0)
+		//pos := Position{Id: uint(ID)}
+		//
+		//var data []string
+		//children := req.URL.Query().Get("child")
+		//if children != "" {
+		//	var neededChildren []string
+		//	for _, child := range PositionChildren {
+		//		if isValueInList(child, strings.Split(children, sep)) {
+		//			neededChildren = append(neededChildren, child)
+		//		}
+		//	}
+		//	data = neededChildren
+		//} else {
+		//	data = PositionChildren
+		//}
+		//
+		//if data != nil && len(data) > 0 {
+		//	sq := database.SQL.Debug().Preload("Position").Preload("Users")
+		//	//sq := database.SQL.Debug()
+		//	//for _, rel := range data {
+		//	//	fmt.Println(rel)
+		//	//	sq.Preload(rel)
+		//	//}
+		//	sq.First("id", &pos)
+		//}
+		//
+		//w.Header().Set("Content-Type", "application/json")
+		//json.NewEncoder(w).Encode(Response{2000, "Data fetched successfully", pos})
+	}
+
 	fmt.Fprintf(file, "%#v", modelFile)
 
 	fmt.Println(entityName + " generated")
 	return entityName
+}
+
+func createEntitiesChildSlice(modelFile *File, entityName string, entityRelationsForAllEndpoint []EntityRelation) {
+	allChildren := []string{}
+	for _, value := range entityRelationsForAllEndpoint {
+		allChildren = append(allChildren, value.SubEntityName)
+	}
+
+	modelFile.Empty()
+	modelFile.Comment("Child entities")
+	modelFile.Var().Id(entityName + "Children").Op("=").Lit(allChildren)
 }
 
 func createEntitiesGetAllMethod(modelFile *File, entityName string, methodName string) {

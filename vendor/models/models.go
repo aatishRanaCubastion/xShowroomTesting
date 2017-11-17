@@ -4,6 +4,11 @@ import (
 	"shared/router"
 	"net/http"
 	"encoding/json"
+	"strings"
+)
+
+const(
+	sep = ","
 )
 
 type Response struct {
@@ -20,4 +25,13 @@ func Load() {
 func Welcome(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(Response{2000, "Welcome to xShowroom", nil})
+}
+
+func isValueInList(value string, list []string) bool {
+	for _, v := range list {
+		if strings.ToLower(v) == strings.ToLower(value) {
+			return true
+		}
+	}
+	return false
 }
