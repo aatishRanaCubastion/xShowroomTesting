@@ -8,6 +8,8 @@ import (
 	"github.com/jinzhu/gorm"
 	"strings"
 	"fmt"
+	"strconv"
+	"bytes"
 )
 
 type Entity struct {
@@ -468,41 +470,7 @@ func createEntities(entity Entity, db *gorm.DB) string {
 	}
 
 	if allMethodExist {
-		modelFile.Empty()
-		modelFile.Func().Id(allMethodName).Params(handlerRequestParams()).Block()
-
-		////Sample code
-		//// Get the parameter id
-		//params := router.Params(req)
-		//ID, _ := strconv.ParseUint(params.ByName("id"), 10, 0)
-		//pos := Position{Id: uint(ID)}
-		//
-		//var data []string
-		//children := req.URL.Query().Get("child")
-		//if children != "" {
-		//	var neededChildren []string
-		//	for _, child := range PositionChildren {
-		//		if isValueInList(child, strings.Split(children, sep)) {
-		//			neededChildren = append(neededChildren, child)
-		//		}
-		//	}
-		//	data = neededChildren
-		//} else {
-		//	data = PositionChildren
-		//}
-		//
-		//if data != nil && len(data) > 0 {
-		//	sq := database.SQL.Debug().Preload("Position").Preload("Users")
-		//	//sq := database.SQL.Debug()
-		//	//for _, rel := range data {
-		//	//	fmt.Println(rel)
-		//	//	sq.Preload(rel)
-		//	//}
-		//	sq.First("id", &pos)
-		//}
-		//
-		//w.Header().Set("Content-Type", "application/json")
-		//json.NewEncoder(w).Encode(Response{2000, "Data fetched successfully", pos})
+		createEntitiesAllChildMethod(modelFile, entityName, allMethodName, entityRelationsForAllEndpoint)
 	}
 
 	fmt.Fprintf(file, "%#v", modelFile)
@@ -626,6 +594,73 @@ func createEntitiesDeleteMethod(modelFile *File, entityName string, methodName s
 		setJsonHeader(),
 		sendResponse(2000, "Data deleted successfully", Id("nil")),
 	)
+}
+
+func createEntitiesAllChildMethod(modelFile *File, entityName string, allMethodName string, entityRelationsForAllEndpoint []EntityRelation) {
+	modelFile.Empty()
+	modelFile.Func().Id(allMethodName).Params(handlerRequestParams()).BlockFunc(func(g *Group) {
+		g.Empty()
+		g.Comment("Get the parameter id")
+		g.Id("params").Op(":=").Qual("shared/router", "Params").Call(Id("req"))
+		g.Id("ID").Op(",").Id("_").Op(":=").Qual("strconv", "ParseUint").Call(
+			Qual("", "params.ByName").Call(Lit("id")),
+			Id("10"),
+			Id("0"),
+		)
+		g.Id("data").Op(":=").Id(entityName).Op("{").Id("Id").Op(":").Id("uint(ID)").Op("}")
+		g.Empty()
+		g.Var().Id("relations ").Op("[").Id(strconv.Itoa(len(entityRelationsForAllEndpoint))).Op("]").Id("string")
+		g.Id("children").Op(":=").Qual("", "req.URL.Query().Get").Call(Lit("child"))
+		g.If(Id("children").Op("!= \"\"")).
+			Block(
+			Var().Id("neededChildren ").Op("[]").Id("string"),
+
+			For(Id("_,child").Op(":=").Id("range").Id(entityName + "Children")).
+				Block(
+				If(Qual("", "isValueInList").
+					Call(
+					Id("child"),
+					Qual("strings", "Split").
+						Call(
+						Id("children"), Id("sep"),
+					),
+				).
+					Block(
+					Id("neededChildren").Op("=").Qual("", "append").Call(Id("neededChildren"), Id("child")),
+				),
+				), ),
+
+			Empty(),
+
+			For(Id("i").Op(":=").Id("range").Id("neededChildren")).
+				Block(
+				Id("relations").Op("[").Id("i").Op("]").Op("=").Id("neededChildren").Op("[").Id("i").Op("]"),
+			),
+		).Else().
+			Block(
+			For(Id("i").Op(":=").Id("range").Id(entityName + "Children")).
+				Block(
+				Id("relations").Op("[").Id("i").Op("]").Op("=").Id(entityName + "Children").Op("[").Id("i").Op("]"),
+			),
+		)
+		g.If(Qual("", "len").Call(Id("relations")).Op(">0")).BlockFunc(func(g *Group) {
+
+			var buffer bytes.Buffer
+			buffer.WriteString("SQL.")
+			for i := range entityRelationsForAllEndpoint {
+				buffer.WriteString("Preload(relations[" + strconv.Itoa(i) + "]).")
+			}
+			buffer.WriteString("First")
+			g.Qual("shared/database", buffer.String()).Call(Op("&").Id("data"))
+		})
+		g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+		g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+			Op("{").
+			Id("2000").Op(",").
+			Lit("Data fetched successfully").Op(",").
+			Id("data").
+			Op("}"))
+	})
 }
 
 func mapColumnTypes(col Column, g *Group) {
