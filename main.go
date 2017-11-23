@@ -254,7 +254,8 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 	//fetch relations of this entity matching parent
 	relationsParent := []Relation{}
-	db.Preload("ChildEntity").
+	db.Preload("InterEntity").
+		Preload("ChildEntity").
 		Preload("ChildColumn").
 		Preload("ParentColumn").
 		Where("parent_entity_id=?", entity.ID).
@@ -262,7 +263,8 @@ func createEntities(entity Entity, db *gorm.DB) string {
 
 	//fetch relations of this entity matching child
 	relationsChild := []Relation{}
-	db.Preload("ParentEntity").
+	db.Preload("InterEntity").
+		Preload("ParentEntity").
 		Preload("ChildColumn").
 		Preload("ParentColumn").
 		Where("child_entity_id=?", entity.ID).
@@ -304,7 +306,12 @@ func createEntities(entity Entity, db *gorm.DB) string {
 				entityRelationsForAllEndpoint = append(entityRelationsForAllEndpoint, EntityRelation{"OneToMany", relationName, childName})
 				g.Id(finalId)
 			case 3: //many to many
-
+				relationName := name + "s"
+				finalId := relationName + " []" + name + " `gorm:\"many2many:" + relation.InterEntity.Name + "\" json:\"" + relation.ChildEntity.DisplayName + "s,omitempty\"`"
+				g.Id(finalId)
+				entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"ManyToMany", name, childName})
+				//handle for many to many(all child entities)
+				//entityRelationsForAllEndpoint = append(entityRelationsForAllEndpoint, EntityRelation{"ManyToMany", relationName, childName})
 			}
 		}
 
@@ -330,7 +337,8 @@ func createEntities(entity Entity, db *gorm.DB) string {
 				entityRelationsForEachEndpoint = append(entityRelationsForEachEndpoint, EntityRelation{"ManyToOne", name, childName})
 				g.Id(finalId)
 			case 3: //many to many
-
+				// add two record in relation table to create many to many or uncomment this and add relation here
+				//fmt.Println("\t\t many to many " + relation.InterEntity.DisplayName + " for " + entityName + " from child")
 			}
 		}
 	})
