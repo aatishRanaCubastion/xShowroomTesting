@@ -395,6 +395,12 @@ func createEntities(entity Entity, db *gorm.DB) string {
 					g.Empty()
 					g.Comment("belongs to")
 					g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/"+strings.ToLower(entRel.SubEntityName)), Id(methodName))
+				} else if entRel.Type == "ManyToMany" {
+					methodName := "Get" + entityName + entRel.SubEntityName + "s"
+					specialMethods = append(specialMethods, EntityRelationMethod{methodName, entRel.Type, entRel.SubEntityName, entRel.SubEntityColName})
+					g.Empty()
+					g.Comment("has many to many")
+					g.Qual("shared/router", "Get").Call(Lit("/"+strings.ToLower(entityName)+"/:id/"+strings.ToLower(entRel.SubEntityName)), Id(methodName))
 				}
 
 			}
@@ -465,6 +471,23 @@ func createEntities(entity Entity, db *gorm.DB) string {
 				if method.Type == "OneToOne_self" {
 					g.Id("data").Op(":= ").Id(method.SubEntityName).Id("{}")
 					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Lit(" "+method.SubEntityColName+" = ?"), Id("ID"))
+					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
+					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
+						Op("{").
+						Id("2000").Op(",").
+						Lit("Data fetched successfully").Op(",").
+						Id("data").
+						Op("}"))
+				}
+
+				if method.Type == "ManyToMany" {
+
+					relation := method.SubEntityName + "s"
+
+					g.Id("data").Op(":=").Id(entityName).Id("{}")
+					g.Qual("shared/database", "SQL.Find").Call(Id("&").Id("data"), Id("ID"))
+					g.Qual("shared/database", "SQL.Model").Call(Id("&").Id("data")).Op(".").Id("Association").Call(Lit(relation)).
+						Op(".").Id("Find").Call(Id("&").Id("data").Op(".").Id(relation))
 					g.Qual("", "w.Header().Set").Call(Lit("Content-Type"), Lit("application/json"))
 					g.Qual("encoding/json", "NewEncoder").Call(Id("w")).Op(".").Id("Encode").Call(Id("Response").
 						Op("{").
